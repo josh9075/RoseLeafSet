@@ -1,0 +1,121 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>RoseLeafSet - Predict</title>
+    <style>
+      body{font-family:system-ui, -apple-system, Roboto, sans-serif;max-width:780px;margin:2rem auto;padding:1rem}
+      .card{border:1px solid #e6e6e6;border-radius:8px;padding:1rem;background:#fff}
+      .row{display:flex;gap:1rem;align-items:flex-start}
+      .preview{width:320px;height:320px;border:1px dashed #ccc;display:flex;align-items:center;justify-content:center;overflow:hidden}
+      .preview img{max-width:100%;max-height:100%}
+      .sidebar{flex:1}
+      .spinner{display:none}
+      ul.pred{list-style:none;padding:0}
+      ul.pred li{padding:0.25rem 0;border-bottom:1px solid #f1f1f1}
+    </style>
+  </head>
+  <body>
+    <h1>RoseLeafSet — Disease Predictor</h1>
+    <div class="card">
+      <div class="row">
+        <div class="preview" id="preview">No image selected</div>
+        <div class="sidebar">
+          <form id="upload-form" method="post" enctype="multipart/form-data">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <button type="submit">Predict</button>
+            <div class="spinner" id="spinner">Processing...</div>
+          </form>
+
+          <div id="result" style="margin-top:1rem; display:none">
+            <h3>Top Predictions</h3>
+            <ul class="pred" id="pred-list"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+    const form = document.getElementById('upload-form');
+    const preview = document.getElementById('preview');
+    const spinner = document.getElementById('spinner');
+    const predList = document.getElementById('pred-list');
+    const resultDiv = document.getElementById('result');
+
+    // Show image preview when file selected
+    const fileInput = document.querySelector('input[type=file]');
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) { preview.innerText = 'No image selected'; return; }
+      const url = URL.createObjectURL(file);
+      preview.innerHTML = '';
+      const img = document.createElement('img'); img.src = url; preview.appendChild(img);
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      spinner.style.display = 'inline';
+      predList.innerHTML = '';
+      resultDiv.style.display = 'none';
+
+      const data = new FormData(form);
+      try {
+        const resp = await fetch('/api/predict/', { method: 'POST', body: data });
+        spinner.style.display = 'none';
+
+        // If server returned non-2xx, show text body as error
+        if (!resp.ok) {
+          const txt = await resp.text();
+          console.error('Server error', resp.status, txt);
+          predList.innerHTML = `<li>Server error: ${resp.status} - ${txt}</li>`;
+          resultDiv.style.display = 'block';
+          return;
+        }
+
+        let json;
+        try {
+          json = await resp.json();
+        } catch (parseErr) {
+          const txt = await resp.text();
+          console.error('Invalid JSON response', txt);
+          predList.innerHTML = `<li>Invalid server response: ${txt}</li>`;
+          resultDiv.style.display = 'block';
+          return;
+        }
+
+        if (json.error) {
+          predList.innerHTML = `<li>Error: ${json.error}</li>`;
+          resultDiv.style.display = 'block';
+          return;
+        }
+
+        const topk = json.topk || [];
+        if (!Array.isArray(topk) || topk.length === 0) {
+          predList.innerHTML = `<li>No predictions returned</li>`;
+          resultDiv.style.display = 'block';
+          return;
+        }
+
+        topk.forEach(item => {
+          const li = document.createElement('li');
+          // safe probability formatting
+          let probText = '';
+          const p = Number(item.probability);
+          if (!Number.isFinite(p)) probText = 'N/A';
+          else probText = `${(p*100).toFixed(2)}%`;
+          li.innerText = `${item.label} — ${probText}`;
+          predList.appendChild(li);
+        });
+        resultDiv.style.display = 'block';
+      } catch (err) {
+        spinner.style.display = 'none';
+        console.error('Fetch error', err);
+        predList.innerHTML = `<li>Unexpected error: ${err && err.message ? err.message : String(err)}</li>`;
+        resultDiv.style.display = 'block';
+      }
+    });
+    </script>
+  </body>
+</html>
